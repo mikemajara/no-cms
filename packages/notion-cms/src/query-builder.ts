@@ -3,8 +3,10 @@ import {
   QueryDatabaseParameters,
   PageObjectResponse,
 } from "@notionhq/client/build/src/api-endpoints";
-import { DatabaseRecord, processNotionRecords } from "./generator";
+import { DatabaseRecord } from "./generator";
 import { debug } from "./utils/debug";
+import { FileManager } from "./file-manager";
+import { DatabaseService } from "./database-service";
 
 export type SortDirection = "ascending" | "descending";
 export type LogicalOperator = "and" | "or";
@@ -471,11 +473,24 @@ export class QueryBuilder<
   private pageLimit: number = 100;
   private startCursor?: string;
   private singleMode: "required" | "optional" | null = null;
+  private fileManager?: FileManager;
+  private databaseService: DatabaseService;
 
-  constructor(client: Client, databaseId: string, fieldTypes: M = {} as M) {
+  constructor(
+    client: Client,
+    databaseId: string,
+    fieldTypes: M = {} as M,
+    fileManager?: FileManager
+  ) {
     this.client = client;
     this.databaseId = databaseId;
     this.fieldTypes = fieldTypes;
+    this.fileManager = fileManager;
+    // Create DatabaseService instance for unified record processing
+    this.databaseService = new DatabaseService(
+      client,
+      fileManager || new FileManager({})
+    );
   }
 
   /**
@@ -764,7 +779,22 @@ export class QueryBuilder<
       debug.log(`Query returned ${response.results.length} results`);
 
       const pages = response.results as PageObjectResponse[];
-      const results = processNotionRecords(pages) as T[];
+
+      // Debug logging
+      debug.log(`[QueryBuilder] FileManager present:`, !!this.fileManager);
+      debug.log(
+        `[QueryBuilder] Cache enabled:`,
+        this.fileManager?.isCacheEnabled()
+      );
+
+      // Always use unified processing - FileManager strategy handles caching behavior
+      debug.log(
+        `[QueryBuilder] Using unified processing with ${pages.length} pages`
+      );
+      const results = await this.databaseService.processNotionRecords<T>(pages);
+      debug.log(
+        `[QueryBuilder] Processed ${results.length} records with unified processing`
+      );
 
       return {
         results,
